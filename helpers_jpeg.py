@@ -10,6 +10,7 @@
     Pure-python, meaning it won't be the fastest out there.
     
     Some interesting reading:
+    - https://helpful.knobs-dials.com/index.php/Image_file_format_notes#Notes_on_JPEG_file_structure
     - http://www.opennet.ru/docs/formats/jpeg.txt
     - http://www.tex.ac.uk/ctan/support/jpeg2ps/readjpeg.c
     - https://svn.xiph.org/experimental/giles/jpegdump.c
