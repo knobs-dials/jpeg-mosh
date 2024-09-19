@@ -1,0 +1,30 @@
+#!/usr/bin/python3
+'''
+Takes a jpeg, writes a new _moshed.jpeg
+
+TODO: parse and pass throug parameters that control the corruption
+
+CONSIDER: an animated gif maker too
+'''
+import sys
+import pathlib # py3.4
+
+import helpers_jpeg
+
+
+# Most of this is quick and dirty
+
+for fn in sys.argv[1:]:
+    in_pth  = pathlib.Path( fn )
+    out_pth = pathlib.Path( in_pth.stem + '_moshed.jpg' )
+
+    if out_pth.exists():
+        print("SKIP: refusing to replace existing file: %s"%out_pth)
+    else:
+        print( in_pth, '-->', out_pth )
+
+        with in_pth.open(mode='rb') as rf:
+            with out_pth.open(mode='wb') as wf:
+                jpeg_bytes = rf.read()
+                moshed_bytes = helpers_jpeg.mosh_jpeg_data( jpeg_bytes )
+                wf.write( moshed_bytes )
