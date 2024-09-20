@@ -1,22 +1,61 @@
 #!/usr/bin/python3
 '''
-Takes a jpeg, writes a new _moshed.jpeg
+Takes a jpeg, writes a new moshed.jpeg
 
-TODO: parse and pass throug parameters that control the corruption
-
-CONSIDER: an animated gif maker too
+CONSIDER: the animated gif maker too
 '''
 import sys
+import warnings
+import optparse
 import pathlib # py3.4
 
 import helpers_jpeg
 
+## Parse parameters
+p = optparse.OptionParser()
+p.add_option("-q", "--corrupt-qt",  dest="qt", action="store", default="2,1",
+             help="""How much to corrup tthe quantization tables. 
+             E.g. 3,1 means 'pick a random byte three times, flip one bit in it'. 
+             For these tables, 1,1 is often subtler, 10,1 is a bunch. Use 0,0 to not do so at all.""")
 
-# Most of this is quick and dirty
+p.add_option("-i", "--corrupt-im",  dest="im", action="store", default="15,1",
+             help="""How much to corrupt the image data. Same interpretation as --corrupt-qt. Try 0,0 (nothing), 2,1, 100,2. Larger will probably just break the image early, and make an empty/patterned rest of the image.""")
 
-for fn in sys.argv[1:]:
+options, args = p.parse_args()    # defaults to parsing sys.argv[1:]
+# note that errors in arguments means this call exits the program.
+
+# Validate parameters
+try:
+    qt = tuple( int(v)   for v in options.qt.split(',') )
+    if len(qt) != 2:
+        raise ValueError("not of length 2")
+    if qt[0]>0 and qt[1]==0:
+        warnings.warn("changing nothing multiple times doesn't make a lot of sense")
+except ValueError:
+    print(f"did not understand {repr(qt)} as a pair of integers.  Should look like 2,1 ")
+
+try:
+    im = tuple( int(v)   for v in options.im.split(',') )
+    if len(im) != 2:
+        raise ValueError("not of length 2")
+    if im[0]>0 and im[1]==0:
+        warnings.warn("changing nothing multiple times doesn't make a lot of sense")
+except ValueError:
+    print(f"did not understand {repr(im)} as a pair of integers.  Should look like 15,1 ")
+
+typ=0
+if qt[0]>0:
+    typ|=1
+if im[0]>0:
+    typ|=2
+
+#print(typ,qt,im)
+
+## Run on files.
+for fn in args:
     in_pth  = pathlib.Path( fn )
     out_pth = pathlib.Path( in_pth.stem + '_moshed.jpg' )
+    out_pth = in_pth.with_suffix('.moshed__%d_%d__%d_%d_.jpg'%( qt[0],qt[1], im[0],im[1]) )
 
     if out_pth.exists():
         print("SKIP: refusing to replace existing file: %s"%out_pth)
@@ -24,7 +63,15 @@ for fn in sys.argv[1:]:
         print( in_pth, '-->', out_pth )
 
         with in_pth.open(mode='rb') as rf:
+            jpeg_bytes = rf.read()
+
+            try:
+                moshed_bytes = helpers_jpeg.mosh_jpeg_data( jpeg_bytes, typ=typ, qt=qt, im=im, validate=True )
+            except Exception as e:
+                print("Failed to mosh")
+                print( str(e) )
+                continue
+
             with out_pth.open(mode='wb') as wf:
-                jpeg_bytes = rf.read()
-                moshed_bytes = helpers_jpeg.mosh_jpeg_data( jpeg_bytes )
                 wf.write( moshed_bytes )
+                
