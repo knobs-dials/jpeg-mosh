@@ -1,24 +1,38 @@
 #!/usr/bin/python3
-'''
+''' Most of this code splits a JPEG file bytestring into its constituent parts - segments, in JPEG parlance.
+
+ 
     read_structure() parses a relatively simple JPEG file into its constituent segments.
     - ...which is less than you were probably looking for.
     - (it originated in somthing even simpler, verying that the mars rover images were indeed an unusual JPEG flavour)
     
-    mosh_jpeg_data() takes the segments from read_structure() and corrupts a few of them
+    mosh_jpeg_data() takes the segments from read_structure() and corrupts a few specific segments
+
+    Pure-python, meaning it won't be the fastest out there.
 
         
-    Pure-python, meaning it won't be the fastest out there.
-    
     Some interesting reading:
-    - https://helpful.knobs-dials.com/index.php/Image_file_format_notes#Notes_on_JPEG_file_structure
-    - http://www.opennet.ru/docs/formats/jpeg.txt
-    - http://www.tex.ac.uk/ctan/support/jpeg2ps/readjpeg.c
-    - https://svn.xiph.org/experimental/giles/jpegdump.c
-    - http://fotoforensics.com/tutorial-estq.php  'estimating quality based on quantization tables"
-    - http://en.wikibooks.org/wiki/JPEG_-_Idea_and_Practice/The_header_part
-    - http://www.digitalpreservation.gov/formats/fdd/fdd000017.shtml
-    - https://web.archive.org/web/20240406182506/https://koushtav.me/jpeg/tutorial/2017/11/25/lets-write-a-simple-jpeg-library-part-1/
-    
+      - https://helpful.knobs-dials.com/index.php/Image_file_format_notes#Notes_on_JPEG_file_structure
+      - http://www.opennet.ru/docs/formats/jpeg.txt
+      - http://www.tex.ac.uk/ctan/support/jpeg2ps/readjpeg.c
+      - https://svn.xiph.org/experimental/giles/jpegdump.c
+      - http://fotoforensics.com/tutorial-estq.php  'estimating quality based on quantization tables"
+      - http://en.wikibooks.org/wiki/JPEG_-_Idea_and_Practice/The_header_part
+      - http://www.digitalpreservation.gov/formats/fdd/fdd000017.shtml
+      - https://web.archive.org/web/20240406182506/https://koushtav.me/jpeg/tutorial/2017/11/25/lets-write-a-simple-jpeg-library-part-1/
+
+          
+    A lot of JPEGs out there, in terms of segments, look a lot like:
+     - SOI  (0xD8) - start of image
+     - APP0 (0xE0), including
+     - a SOF variant (SOF0..SOF15 are 0xC0..0xCF), usually either SOF0 (baseline sequential, huffman) or SOF2 (progressive, huffman)
+     - DQT (DB) - quantization tables, one or more (and can come before SOF)
+     - DHT (C4) - huffman tables (DHT), one or more
+     - SOS (DA) - start of scan
+       - compressed image data following the SOS
+     - EOI (D9) - end of image (sometimes omitted) 
+
+    ...which also means you can strip out half the code below and have it still work fine for our currently-only-corrupting needs.
 '''
 
 import io
@@ -66,8 +80,8 @@ def read_structure(jpeg_data:bytes, debug:bool=False):
     '''
     i = 0
     dsize = len(jpeg_data)
-    while i < len(jpeg_data):
 
+    while i < len(jpeg_data):
         if debug:
             print( 'now at bytepos %d of %d'%(i,dsize) )
 
@@ -87,50 +101,50 @@ def read_structure(jpeg_data:bytes, debug:bool=False):
         #parsed  = {} # TODO: start using. Informational.
         # TODO: yield these one at a time
 
-        ma = jpeg_data[i+1] # marker
+        marker = jpeg_data[i+1]
         # first handle markers with fixed-size payloads (because those won't code their own size)
         if debug:
-            print( "    marker byte  [%02x]"%(ma))
-        if   ma == SOI:
+            print( "    marker byte  [%02x]"%(marker))
+        if   marker == SOI:
             descr = "Start Of Image"
             moveon = 2
-        elif ma == EOI:
+        elif marker == EOI:
             descr = "End Of Image"
             moveon = 2
-        elif ma == 0xd0:
+        elif marker == 0xd0:
             descr = 'restart 0'
             moveon = 2
-        elif ma == 0xd1:
+        elif marker == 0xd1:
             descr = 'restart 1'
             moveon = 2
-        elif ma == 0xd2:
+        elif marker == 0xd2:
             descr = 'restart 2'
             moveon = 2
-        elif ma == 0xd3:
+        elif marker == 0xd3:
             descr = 'restart 3'
             moveon = 2
-        elif ma == 0xd4:
+        elif marker == 0xd4:
             descr = 'restart 4'
             moveon = 2
-        elif ma == 0xd5:
+        elif marker == 0xd5:
             descr = 'restart 5'
             moveon = 2
-        elif ma == 0xd6:
+        elif marker == 0xd6:
             descr = 'restart 6'
             moveon = 2
-        elif ma == 0xd7:
+        elif marker == 0xd7:
             descr = 'restart 7'
             moveon = 2
-        elif ma >= 0x30 and ma <= 0x3f:
+        elif marker >= 0x30 and marker <= 0x3f:
             descr = 'reserved JP2'
             moveon = 2
-        elif ma==0xdd:
+        elif marker==0xdd:
             descr = 'restart interval'
             moveon = 6
 
-        elif ma==SOS:
-            # Start of Scan, and unlike other segments, we have to actually _parse its data_ to figure out its size
-            #  And note that _which_ Start of Frame (SOF0, SOF1, or SOF2) will indicate how it should be parsed
+        elif marker==SOS:
+            # Start of Scan.  Unlike other segments, we have to actually _parse its data_ to figure out its size
+            #  And note that _which_ Start-of-Frame flavour (SOF0, SOF1, or SOF2) will direct how exactly it should be parsed
 
             # 2 bytes: length
             #   ...of the header, i.e.
@@ -169,7 +183,7 @@ def read_structure(jpeg_data:bytes, debug:bool=False):
                         print( "Q ")
                     else:
                         print( cid)
-                htab = jpeg_data[i+4+2*ci+1]
+                htab    = jpeg_data[i+4+2*ci+1]
                 htab_ac = (htab&0xf0)>>4
                 htab_dc = htab&0x0f
                 if debug:
@@ -187,102 +201,103 @@ def read_structure(jpeg_data:bytes, debug:bool=False):
             #    print('segdata', repr(segdata))
 
         else: # assume it's one that codes its length
-            if   ma==COM:
+            if   marker==COM:
                 descr = 'comment'
 
-            elif ma >= APP0  and  ma <= APP15:
+            elif marker >= APP0  and  marker <= APP15:
                 descr = 'APP%d %r'%(
-                    ma-0xe0,
+                    marker-0xe0,
                     jpeg_data[i+4: jpeg_data.find(b'\x00',i+5) ]
                 )
 
-            elif ma==HQT:
+            elif marker==HQT:
                 descr = 'huffman tables'
-            elif ma==DQT:
+            elif marker==DQT:
                 descr = 'quantization tables'
 
             # almost all JFIFs in the wild are C0, C2, or the occasional C1
-            elif ma==SOF0:
+            elif marker==SOF0:
                 descr = 'start of frame, baseline sequential, huffman'
-            elif ma==SOF2:
+            elif marker==SOF2:
                 descr = 'start of frame, progressive, huffman'
-            elif ma == SOF1:
+            elif marker == SOF1:
                 descr = 'start of frame, extended sequential, huffman'
-            elif ma == SOF9:
+            elif marker == SOF9:
                 descr = 'start of frame, extended sequential, arithmetic'
 
             # most others are unused
-            elif ma == 0xc3:
+            elif marker == 0xc3:
                 descr = '(start of frame? -) lossless'
-            elif ma == 0xc5:
+            elif marker == 0xc5:
                 descr = '(start of frame? -) differential sequential DCI'
-            elif ma == 0xc6:
+            elif marker == 0xc6:
                 descr = '(start of frame? -) differential progressive DCI'
-            elif ma == 0xc7:
+            elif marker == 0xc7:
                 descr = '(start of frame? -) differential lossless'
-            elif ma == 0xc8:
+            elif marker == 0xc8:
                 descr = 'JPEG extensions'
-            elif ma == 0xca:
+            elif marker == 0xca:
                 descr = '(start of frame? -) extended progressive DCT'
-            elif ma == 0xcb:
+            elif marker == 0xcb:
                 descr = '(start of frame? -) extended lossless'
-            elif ma == 0xcc:
+            elif marker == 0xcc:
                 descr = 'arithmetic conditioning table'
 
             # Dunno, don't really care, could remove for my purposes?
-            elif ma >= 0xf0 and ma <= 0xf6:
+            elif marker >= 0xf0 and marker <= 0xf6:
                 descr = 'JPEG extensions, ITU T.84/IEC 10918-3'
-            elif ma == 0xf7:
+            elif marker == 0xf7:
                 descr = 'JPEG LS - SOF48'
-            elif ma == 0xf8:
+            elif marker == 0xf8:
                 descr = 'JPEG LS - LSE'
-            elif ma >= 0xf9 and ma <= 0xffd:
+            elif marker >= 0xf9 and marker <= 0xffd:
                 descr = 'JPEG extensions, ITU T.84/IEC 10918-3'
-            elif ma >= 0x4f and ma <= 0x6f:
+            elif marker >= 0x4f and marker <= 0x6f:
                 descr = 'JPEG extensions, JPEG2000?'
-            elif ma >= 0x90 and ma <= 0x93:
+            elif marker >= 0x90 and marker <= 0x93:
                 descr = 'JPEG extensions, JPEG2000?'
-            elif ma == 0x51:
+            elif marker == 0x51:
                 descr = 'JPEG extensions, JPEG2000?, image and tile size'
-            elif ma == 0x52:
+            elif marker == 0x52:
                 descr = 'JPEG extensions, JPEG2000?, coding style default'
-            elif ma == 0x53:
+            elif marker == 0x53:
                 descr = 'JPEG extensions, JPEG2000?, coding style component'
-            elif ma == 0x5e:
+            elif marker == 0x5e:
                 descr = 'JPEG extensions, JPEG2000?, region of interest'
-            elif ma == 0x5c:
+            elif marker == 0x5c:
                 descr = 'JPEG extensions, JPEG2000?, quantization default'
-            elif ma == 0x5d:
+            elif marker == 0x5d:
                 descr = 'JPEG extensions, JPEG2000?, quantization component'
-            elif ma == 0x5f:
+            elif marker == 0x5f:
                 descr = 'JPEG extensions, JPEG2000?, progression order change'
-            elif ma == 0x55:
+            elif marker == 0x55:
                 descr = 'JPEG extensions, JPEG2000?, tile-part lengths'
-            elif ma == 0x57:
+            elif marker == 0x57:
                 descr = 'JPEG extensions, JPEG2000?, packet length (main header)'
-            elif ma == 0x58:
+            elif marker == 0x58:
                 descr = 'JPEG extensions, JPEG2000?, packet length (tile-part header)'
-            elif ma == 0x60:
+            elif marker == 0x60:
                 descr = 'JPEG extensions, JPEG2000?, packed packet headers (main header)'
-            elif ma == 0x61:
+            elif marker == 0x61:
                 descr = 'JPEG extensions, JPEG2000?, packet packet headers (tile-part header)'
-            elif ma == 0x91:
+            elif marker == 0x91:
                 descr = 'JPEG extensions, JPEG2000?, start of packet'
-            elif ma == 0x92:
+            elif marker == 0x92:
                 descr = 'JPEG extensions, JPEG2000?, end of packet header'
-            elif ma == 0x63:
+            elif marker == 0x63:
                 descr = 'JPEG extensions, JPEG2000?, component reg'
-            elif ma == 0x64:
+            elif marker == 0x64:
                 descr = 'JPEG extensions, JPEG2000?, comment'
 
-            elif ma == 0xfd:
+            elif marker == 0xfd:
                 descr = 'reserved for JPEG extensions'
 
-            elif ma==SOS:
+            elif marker==SOS:
                 descr = 'SOS Start Of Scan'
 
             else:
                 descr = 'unknown marker'
+                # CONSIDER: raise (maybe on request) so that we can test this on a lot of JPEG images?
 
             # data size describes the *whole* frame payload, which includes the two datasize bytes
             datasize = (jpeg_data[i+2]<<8) + jpeg_data[i+3]
@@ -295,13 +310,14 @@ def read_structure(jpeg_data:bytes, debug:bool=False):
 
         if debug:
             #print( "Chunk  size:2+%-3d   type:%02X  %-30s  data:%r"%( moveon-2, ma, descr, segdata ))
-            print( "Chunk  size:2+%-3d   type:%02X  %-30s"%( moveon-2, ma, descr ))
+            print( "Chunk  size:2+%-3d   type:%02X  %-30s"%( moveon-2, marker, descr ))
+
 
         #######
-        # So far we've just been separating segments
+        # So far we've just been separating segments and poking at a few easily parsable things
         # Below is some selective parsing of contents
         if debug:
-            if ma==0xe0:
+            if marker==0xe0:
                 #print( 'segdata_', len(segdata), repr(segdata) )
                 if segdata[0:5] == b'JFIF\x00':
                     units = segdata[7]
@@ -325,8 +341,7 @@ def read_structure(jpeg_data:bytes, debug:bool=False):
                     if debug:
                         print( "Don't know APP0 identifier %r, skipping"%segdata[0:5])
 
-
-            if ma==SOF0: # start of frame, baseline
+            elif marker==SOF0: # start of frame, baseline
                 data_precision = segdata[0]
                 h     = (segdata[1]<<8) + segdata[2]
                 w     = (segdata[3]<<8) + segdata[4]
@@ -354,13 +369,15 @@ def read_structure(jpeg_data:bytes, debug:bool=False):
                         print( 'hsfac:%d vsfac:%d  qtnum:%d'%( (sampfac&0xf0)>>4, sampfac&0x0f, qtnum) )
 
             # elif ma==SOF2: # start of frame, progressive
-            if ma==0xfe:
+            #    pass
+
+            elif marker==0xfe:
                 if debug:
                     print( '      %r'%segdata )
 
         segdata = jpeg_data[i:i+moveon]
         i += moveon
-        yield ma, descr, moveon, segdata
+        yield marker, descr, moveon, segdata
 
 
 
@@ -368,20 +385,37 @@ def mosh_jpeg_data(jpegdata, typ=3, qt=(2,1), im=(15,1), validate=False, validat
     """ Takes a JPEG file's byte data, returns a corrupted JPEG file byte data that hopefully still displays
 
         @param typ: what part(s) to corrupt; 
-          - if typ&1, we corrupt quantization tables according to qt
-          - if typ&2, we corrupt image data according to im
+          - if typ&1, we corrupt quantization tables according to qt (if not, we don't, even if you handed something not 0,0 into the paramters)
+          - if typ&2, we corrupt image data according to im   (if not, we don't, even if you handed something not 0,0 into the paramters)
 
         @param qt: should be a (howmanytimes,howmanybits) tuple, how much to corrupt the quantization tables
         Note that small changes have a lot of effect if early in the table 
         (though we don't currently control where -- that might be interesting to do).
 
+        Eyeballed values used in the app:
+         - 0,0: not
+         - 1,1: a little
+         - 2,2: a little more
+         - 4,2: more
+         - 6,2: a bunch
+         - 12,4: a lot
+
         @param im: should be a (howmanytimes,howmanybits) tuple, how much to corrupt the image data after the SOS
-        You generally want the howmanybits low, because it's very easy to cause a "we can't deal with the rest" breakoff 
-        
+        You generally want the howmanybits low, because it's easy to cause a "we can't deal with the rest" breakoff 
+
+        Eyeballed values used in the app:
+         - 0,0: not
+         - 3,1: a little
+         - 8,2: a little more
+         - 30,2: more
+         - 80,2: a bunch
+         - 140,3: a lot
+
         @param validate: if True, we keep generating until PIL can read it, 
         which is a decent estimation of us not having corrupted it beyond being an image anymore.
-        Depending on the settings you use, this may take a few tries.
-        If False, it just flips some bits and gives you the result.
+        Depending on the settings you use, this may take a few tries,
+        but is also not guaranteed to be as critical as another image reader.
+        If False, it does no checks.
 
         @param validate_maxtries: if validating, how fast to give up 
         (mostly to avoid indinite loop caused by corrupting too much)
@@ -461,9 +495,13 @@ def mosh_jpeg_data(jpegdata, typ=3, qt=(2,1), im=(15,1), validate=False, validat
             return retdata
         else:
             try:
-                im = Image.open( io.BytesIO( mosh_jpeg_data(jpegdata) ) ) # if that doesn't raise an error, we're probably fine
+                #print("Attempting to validate")
+                validate_im = Image.open( io.BytesIO( retdata ) ) # if that doesn't raise an error, we're probably fine
+                validate_im.load()
                 return retdata
             except IOError:
+                #import sys
+                #print( "Image did not parse, retry %d"%tries, file=sys.stderr)
                 continue
 
     raise ValueError("Didn't get valid data after %d tries, you're probably asking for too much corruption."%validate_maxtries)
